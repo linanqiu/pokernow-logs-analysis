@@ -173,3 +173,100 @@ tib <- tibble(
 tib <- as_tibble(cbind(nms = names(tib), t(tib)))
 colnames(tib) <- c('Name', 'Value')
 tib
+
+
+
+
+deltas_test <- d_deltas$deltas[[11]] %>% select(id, delta)
+
+
+calc_delta_transfer <- function(d) {
+  d <- d %>% select(id, delta)
+  deltas_pos <- d %>% filter(delta > 0) %>% mutate(delta_prop = delta / sum(delta)) %>% rename(to = id) %>% select(-delta)
+  deltas_neg <- d %>% filter(delta <= 0) %>% rename(from = id)
+  deltas_neg %>% 
+    mutate(to = map(from, function(from) { deltas_pos })) %>% 
+    unnest(to) %>% 
+    mutate(delta = -1 * delta * delta_prop) %>% 
+    select(-delta_prop) %>% 
+    filter(delta != 0)
+}
+
+d_trans <- d_deltas %>% 
+  filter(!map_lgl(deltas, is.null)) %>% 
+  mutate(transfers = map(deltas, calc_delta_transfer))
+d_trans <- d_trans %>% select(transfers)
+transfers <- d_trans$transfers %>% 
+  bind_rows() %>% 
+  group_by(from, to) %>% 
+  summarize(delta = sum(delta)) %>% 
+  mutate(from = ids_to_names(from), to = ids_to_names(to)) %>% 
+  ungroup() %>% 
+  arrange(from, to)
+
+transfers
+
+library(hrbrthemes)
+
+transfers %>% 
+  ggplot(mapping = aes(x = to, y = from, fill = delta)) +
+  geom_tile() +
+  scale_fill_distiller(palette = "RdOrYl") +
+  geom_text(aes(label = round(delta, 0)))
+
+
+library(igraph)
+
+adjl <- transfers %>% mutate(weight = delta) 
+
+g <- graph_from_data_frame(adjl)
+g
+
+p <- page_rank(g)
+p
+p$vector
+p$value
+
+
+
+
+transfers
+
+id_names_gender <- id_names %>% 
+  mutate(gender = map_chr(names, function(n) {
+    if(n %in% c('Jen', 'CreamPuff', 'Carin')) {
+      'F'
+    } else {
+      'M'
+    }
+  }))
+
+name_to_gender <- function(n) {
+  id_names_gender[id_names_gender$names == n, ]$gender[1]
+}
+
+transfers %>% 
+  mutate(from_g = map_chr(from, name_to_gender), to_g = map_chr(to, name_to_gender)) %>% 
+  select(-c(from, to)) %>% 
+  group_by(from_g, to_g) %>% 
+  summarize(delta = sum(delta) / n())
+
+
+
+deltas_w <- deltas %>% pivot_wider(names_from = name, values_from = delta)
+deltas_w[deltas_w$Gavyn < 0, ] %>% 
+  summarize_at(vars(-hand), function(x) sum(x, na.rm = TRUE))
+
+deltas_w %>% 
+  ggplot(mapping = aes(x = Jen, y = Tim)) +
+  geom_point()
+
+library(corrr)
+
+deltas_w[, c(2:length(deltas_w))] %>% correlate(use = 'pairwise.complete.obs') %>% 
+  pivot_longer(cols = -term) %>% 
+  rename(x = term, y = name) %>% 
+  ggplot(mapping = aes(x = x, y = y, fill = value)) +
+  geom_tile() +
+  scale_fill_distiller(palette = "RdOrYl") +
+  geom_text(aes(label = round(value, 3)))
